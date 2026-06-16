@@ -37,3 +37,6 @@ artifacts/
 .codex/
 .trellis/
 .claude/
+.spec-workflow/*
+AGENTS.md
+CLAUDE.md
