@@ -1,0 +1,27 @@
+{
+  "schema_version": "2.0",
+  "source": {
+    "key": "antigravity",
+    "display_name": "AntiGravity",
+    "icon_name": "antigravity",
+    "permission_response_style": "claude-style"
+  },
+  "detection": {
+    "process_names": ["antigravity"],
+    "path_patterns": ["*antigravity*"],
+    "priority": 1000
+  },
+  "hook_installation": {
+    "format": "nested",
+    "config_path": "~/.antigravity/hooks.json",
+    "events": [
+      "PreToolUse",
+      "PostToolUse",
+      "UserPromptSubmit",
+      "SessionStart",
+      "SessionEnd",
+      "Stop"
+    ],
+    "timeout_seconds": 10
+  }
+}

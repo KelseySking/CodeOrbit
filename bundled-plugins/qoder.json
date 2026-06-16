@@ -1,0 +1,27 @@
+{
+  "schema_version": "2.0",
+  "source": {
+    "key": "qoder",
+    "display_name": "Qoder",
+    "icon_name": "qoder",
+    "permission_response_style": "claude-style"
+  },
+  "detection": {
+    "process_names": ["qoder", "qoder-cli"],
+    "path_patterns": ["*qoder*"],
+    "priority": 1000
+  },
+  "hook_installation": {
+    "format": "nested",
+    "config_path": "~/.qoder/hooks.json",
+    "events": [
+      "PreToolUse",
+      "PostToolUse",
+      "UserPromptSubmit",
+      "SessionStart",
+      "SessionEnd",
+      "Stop"
+    ],
+    "timeout_seconds": 10
+  }
+}

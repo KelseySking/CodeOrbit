@@ -1,0 +1,27 @@
+{
+  "schema_version": "2.0",
+  "source": {
+    "key": "droid",
+    "display_name": "Factory",
+    "icon_name": "factory",
+    "permission_response_style": "claude-style"
+  },
+  "detection": {
+    "process_names": ["droid", "factory"],
+    "path_patterns": ["*droid*", "*factory*"],
+    "priority": 1000
+  },
+  "hook_installation": {
+    "format": "nested",
+    "config_path": "~/.factory/hooks.json",
+    "events": [
+      "PreToolUse",
+      "PostToolUse",
+      "UserPromptSubmit",
+      "SessionStart",
+      "SessionEnd",
+      "Stop"
+    ],
+    "timeout_seconds": 10
+  }
+}
