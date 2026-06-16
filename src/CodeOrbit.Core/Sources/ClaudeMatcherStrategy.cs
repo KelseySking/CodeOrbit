@@ -135,18 +135,18 @@ internal sealed class ClaudeMatcherStrategy : IHookInstallationStrategy
             // Default matcher group (matches all)
             writer.WriteStartObject();
             writer.WritePropertyName("matcher");
-            writer.WriteStringValue("*");
+            writer.WriteStringValue(""); // Empty string matches all, consistent with ConfigInstaller
             writer.WritePropertyName("hooks");
             writer.WriteStartArray();
 
-            // Add CodeOrbit hook
+            // Add CodeOrbit hook with correct timeout for each event
             writer.WriteStartObject();
             writer.WritePropertyName("type");
-            writer.WriteStringValue("shell");
+            writer.WriteStringValue("command"); // Correct type for Claude
             writer.WritePropertyName("command");
             writer.WriteStringValue(hookCommand);
             writer.WritePropertyName("timeout");
-            writer.WriteNumberValue(spec.TimeoutSeconds);
+            writer.WriteNumberValue(GetTimeoutForEvent(eventName, spec.TimeoutSeconds));
             writer.WriteEndObject();
 
             writer.WriteEndArray(); // hooks
@@ -158,6 +158,24 @@ internal sealed class ClaudeMatcherStrategy : IHookInstallationStrategy
         writer.Flush();
         stream.Position = 0;
         return JsonDocument.Parse(stream).RootElement;
+    }
+
+    /// <summary>
+    /// Gets the appropriate timeout for a Claude event.
+    /// PreToolUse, PermissionRequest, and Notification need 86400s for long-running operations.
+    /// Other events use the default timeout from spec.
+    /// </summary>
+    private static int GetTimeoutForEvent(string eventName, int defaultTimeout)
+    {
+        // Match ConfigInstaller.GetClaudeHookTimeout logic
+        if (eventName.Equals("PreToolUse", StringComparison.OrdinalIgnoreCase) ||
+            eventName.Equals("PermissionRequest", StringComparison.OrdinalIgnoreCase) ||
+            eventName.Equals("Notification", StringComparison.OrdinalIgnoreCase))
+        {
+            return 86400;
+        }
+
+        return defaultTimeout;
     }
 
     private static JsonElement RemoveCodeOrbitHooks(JsonElement hooksObj, string sourceKey)

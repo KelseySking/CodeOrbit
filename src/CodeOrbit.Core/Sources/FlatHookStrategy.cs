@@ -133,12 +133,21 @@ internal sealed class FlatHookStrategy : IHookInstallationStrategy
 
     private static JsonElement CreateHookEntry(string eventName, string command, int timeoutSeconds)
     {
-        var json = $@"{{
-            ""event"": ""{eventName}"",
-            ""command"": ""{command}"",
-            ""timeout"": {timeoutSeconds}
-        }}";
-        return JsonDocument.Parse(json).RootElement;
+        using var stream = new MemoryStream();
+        using var writer = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = true });
+
+        writer.WriteStartObject();
+        writer.WritePropertyName("event");
+        writer.WriteStringValue(eventName);
+        writer.WritePropertyName("command");
+        writer.WriteStringValue(command);
+        writer.WritePropertyName("timeout");
+        writer.WriteNumberValue(timeoutSeconds);
+        writer.WriteEndObject();
+
+        writer.Flush();
+        stream.Position = 0;
+        return JsonDocument.Parse(stream).RootElement;
     }
 
     private static JsonElement SerializeHooksArray(List<JsonElement> hooks)

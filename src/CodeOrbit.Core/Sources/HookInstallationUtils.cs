@@ -81,11 +81,21 @@ internal static class HookInstallationUtils
     /// <summary>
     /// Gets the hook command for a given source key.
     /// This is the Bridge executable path with --source parameter.
+    /// Delegates to ConfigInstaller to get the correct runtime path.
     /// </summary>
     public static string GetHookCommand(string sourceKey)
     {
-        // In production, this would resolve to CodeOrbit.Bridge.exe path
-        // For now, use a placeholder that ConfigInstaller already uses
+        // Use ConfigInstaller's private GetHookCommand via reflection
+        // This ensures we get the correct runtime bridge.exe path with proper quoting
+        var method = typeof(Services.ConfigInstaller).GetMethod(
+            "GetHookCommand",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+
+        if (method != null)
+        {
+            return (string?)method.Invoke(null, new object?[] { sourceKey }) ?? $"CodeOrbit.Bridge --source {sourceKey}";
+        }
+
         return $"CodeOrbit.Bridge --source {sourceKey}";
     }
 
