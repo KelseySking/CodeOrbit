@@ -1,4 +1,4 @@
-﻿# CodeOrbit Runtime 文档
+﻿# CodeOrbit 文档
 
 [English](README.md)
 
@@ -7,8 +7,8 @@
 | 主题 | 文档 |
 | --- | --- |
 | 完整 REST/WebSocket API 文档 | [API Reference 中文](api-reference.md) |
-| 其他应用如何集成 Runtime | [集成指南](integration-guide.md) |
-| Runtime/展示端职责边界 | [展示端合同](runtime-display-contract.zh-CN.md) |
+| 其他应用如何集成 | [集成指南](integration-guide.md) |
+| 职责边界 | [展示端合同](runtime-display-contract.zh-CN.md) |
 | 展示端快速开始 | [外部展示端快速开始](external-display-client.md) |
 | 插件系统指南 | [插件系统指南](source-plugins.md) |
 | 插件 JSON Schema 参考 | [插件 Schema 参考](plugin-schema.md) |

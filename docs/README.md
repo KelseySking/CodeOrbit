@@ -1,4 +1,4 @@
-﻿# CodeOrbit Runtime Documentation
+﻿# CodeOrbit Documentation
 
 [简体中文](README_CN.md)
 
@@ -7,8 +7,8 @@ Start here instead of browsing the repository manually.
 | Topic | Document |
 | --- | --- |
 | Full REST/WebSocket API reference | [API Reference](api-reference.en.md) |
-| How other apps integrate Runtime | [Integration Guide](integration-guide.en.md) |
-| Runtime/display ownership boundary | [Display Contract](runtime-display-contract.md) |
+| How other apps integrate | [Integration Guide](integration-guide.en.md) |
+| Ownership boundary | [Display Contract](runtime-display-contract.md) |
 | Quickstart for display clients | [External Display Quickstart](external-display-client.en.md) |
 | Plugin system guide | [Plugin System Guide](source-plugins.en.md) |
 | Plugin JSON schema reference | [Plugin Schema Reference](plugin-schema.en.md) |

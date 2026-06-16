@@ -1,4 +1,4 @@
-﻿# CodeOrbit Runtime - publish Runtime artifacts
+﻿# CodeOrbit - publish artifacts
 param(
     [string]$Runtime = "win-x64",
     [string]$Configuration = "Release",
@@ -73,7 +73,7 @@ if (-not $version) { $version = "0.0.0" }
 Write-RuntimeManifest -RuntimeDir $stagingDir -RuntimeVersion $version
 
 if (-not (Test-Path -LiteralPath $outputPath)) { New-Item -ItemType Directory -Path $outputPath | Out-Null }
-$zipName = "CodeOrbit-Runtime-$Runtime-v$version.zip"
+$zipName = "CodeOrbit-$Runtime-v$version.zip"
 $zipPath = Join-Path $outputPath $zipName
 if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
 Compress-Archive -Path (Join-Path $stagingDir "*") -DestinationPath $zipPath
@@ -84,9 +84,9 @@ $updateManifest = [ordered]@{
     downloadUrl = $DownloadUrl
     sha256 = Get-FileSha256 -Path $zipPath
 }
-$manifestPath = Join-Path $outputPath "CodeOrbit-Runtime-$Runtime-v$version.update.json"
+$manifestPath = Join-Path $outputPath "CodeOrbit-$Runtime-v$version.update.json"
 $updateManifest | ConvertTo-Json | Set-Content -Path $manifestPath -Encoding UTF8
 
 Remove-Item -LiteralPath $stagingDir -Recurse -Force
-Write-Host "Runtime ZIP created: $zipPath" -ForegroundColor Green
+Write-Host "ZIP created: $zipPath" -ForegroundColor Green
 Write-Host "Update manifest created: $manifestPath" -ForegroundColor Green

@@ -1,6 +1,6 @@
 ﻿# 外部展示控制台示例
 
-这是一个最小 CodeOrbit Runtime API 展示客户端。它只使用 .NET 内置 HTTP 和 WebSocket API，因此不需要安装包，也不依赖 WPF 或 Hub 内部实现类型。
+这是一个最小 CodeOrbit API 展示客户端。它只使用 .NET 内置 HTTP 和 WebSocket API，因此不需要安装包，也不依赖 WPF 或 Hub 内部实现类型。
 
 ## 连接主应用
 
