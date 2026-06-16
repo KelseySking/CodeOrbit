@@ -1,5 +1,6 @@
 using System.Text.Json;
 using CodeIsland.Core.Models;
+using CodeIsland.Core.Sources;
 
 namespace CodeIsland.Bridge;
 
@@ -35,10 +36,11 @@ public static class SourceResolver
     /// </summary>
     public static string InferSource(List<ProcessInfo> ancestry, string? explicitSource = null, JsonElement? payload = null)
     {
-        // 显式指定的来源优先
+        // 1. 显式指定的来源优先（最高优先级）
         if (NormalizeSource(explicitSource) is { } normalizedExplicit)
             return normalizedExplicit;
 
+        // 2. 内置源检测（高优先级，防止插件覆盖）
         foreach (var proc in ancestry)
         {
             var name = Path.GetFileNameWithoutExtension(proc.Name);
@@ -60,6 +62,20 @@ public static class SourceResolver
             }
         }
 
+        // 3. 插件检测规则（中优先级）
+        try
+        {
+            var processList = ancestry.Select(p => (p.Name, p.ExecutablePath));
+            var pluginSource = PluginProcessDetector.DetectFromProcessList(processList);
+            if (pluginSource != null)
+                return pluginSource;
+        }
+        catch
+        {
+            // Plugin detection failure should not block built-in detection
+        }
+
+        // 4. Payload 检查（最低优先级 fallback）
         return ExtractSourceFromPayload(payload) ?? "unknown";
     }
 

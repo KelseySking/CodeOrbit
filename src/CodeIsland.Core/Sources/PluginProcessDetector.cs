@@ -8,6 +8,19 @@ public static class PluginProcessDetector
     private static Lazy<IReadOnlyList<DetectionRule>> _rules = new(LoadDetectionRules);
 
     /// <summary>
+    /// Detects CLI source from process list using plugin detection rules.
+    /// This overload accepts a simple process list with name and executable path.
+    /// </summary>
+    public static string? DetectFromProcessList(IEnumerable<(string Name, string? ExecutablePath)> processes)
+    {
+        var processInfos = processes
+            .Select(p => new ProcessInfo(0, 0, p.Name, p.ExecutablePath, DateTime.UtcNow))
+            .ToList();
+
+        return DetectFromAncestry(processInfos);
+    }
+
+    /// <summary>
     /// Detects CLI source from process ancestry using plugin detection rules.
     /// Returns null if no plugin matches.
     /// </summary>
