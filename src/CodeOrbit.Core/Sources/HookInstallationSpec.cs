@@ -37,6 +37,12 @@ public static class HookFormats
     public const string Nested = "nested";
 
     /// <summary>
+    /// Codex format: {hooks: {EventName: [{hooks: [{type, command, commandWindows?, timeout, statusMessage?}]}]}}
+    /// Used by: Codex CLI
+    /// </summary>
+    public const string Codex = "codex";
+
+    /// <summary>
     /// Claude matcher format: {hooks: {EventName: [{matcher, hooks: [...]}]}}
     /// Used by: Claude
     /// </summary>
@@ -49,6 +55,7 @@ public static class HookFormats
     {
         Flat,
         Nested,
+        Codex,
         ClaudeMatcher
     };
 

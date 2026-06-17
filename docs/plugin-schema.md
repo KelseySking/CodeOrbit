@@ -152,7 +152,7 @@
 
 | 字段 | 类型 | 必需 | 描述 |
 |------|------|------|------|
-| `format` | string | ✅ | Hook 格式：`"flat"`, `"nested"`, 或 `"claude-matcher"` |
+| `format` | string | ✅ | Hook 格式：`"flat"`, `"nested"`, `"codex"`, 或 `"claude-matcher"` |
 | `config_path` | string | ✅ | 配置文件路径（支持 `~/` 和环境变量） |
 | `events` | string[] | ✅ | 要安装的 hook 事件 |
 | `timeout_seconds` | number | ✅ | hook 执行的默认超时时间（1-86400） |
@@ -198,7 +198,7 @@
 
 ##### **Nested 格式** (`"nested"`)
 
-使用者：Gemini, Codex
+使用者：Gemini
 
 结构：嵌套对象，包含事件数组
 
@@ -220,6 +220,38 @@
   }
 }
 ```
+
+##### **Codex 格式** (`"codex"`)
+
+使用者：Codex CLI
+
+结构：双层嵌套，每个事件包含 `{hooks: [...]}` 包裹层
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "CodeOrbit.Bridge --source my-cli",
+            "commandWindows": "C:\\path\\to\\bridge.exe --source my-cli",
+            "timeout": 86400,
+            "statusMessage": "Running hook"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+**注意**：
+- Codex 格式需要 `type: "command"` 字段
+- `commandWindows` 是 Windows 特定命令（无引号，避免 cmd.exe /C 解析问题）
+- `statusMessage` 在 CLI 中显示给用户
+- `PreToolUse` 和 `PermissionRequest` 事件需要长超时（86400 秒）以等待用户批准
 
 ##### **Claude Matcher 格式** (`"claude-matcher"`)
 

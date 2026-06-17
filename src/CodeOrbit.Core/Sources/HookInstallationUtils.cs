@@ -100,6 +100,23 @@ internal static class HookInstallationUtils
     }
 
     /// <summary>
+    /// Gets the Bridge executable path from ConfigInstaller.
+    /// </summary>
+    public static string GetBridgeExecutablePath()
+    {
+        var property = typeof(Services.ConfigInstaller).GetProperty(
+            "RuntimeBridgeExePath",
+            System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+
+        if (property != null)
+        {
+            return (string?)property.GetValue(null) ?? "CodeOrbit-bridge.exe";
+        }
+
+        return "CodeOrbit-bridge.exe";
+    }
+
+    /// <summary>
     /// Merges two JSON objects, with target taking precedence for conflicts.
     /// </summary>
     public static JsonElement MergeJsonObjects(JsonElement source, JsonElement target)
