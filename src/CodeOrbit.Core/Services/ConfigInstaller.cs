@@ -349,9 +349,11 @@ public static class ConfigInstaller
         Directory.CreateDirectory(CodeOrbitDir);
 
         var bridgePath = BridgeExePath;
+        var bundledPluginsDir = Path.Combine(Path.GetDirectoryName(bridgePath)!, "bundled-plugins");
         var script = $$"""
             $bridge = "{{bridgePath}}"
             if (Test-Path $bridge) {
+                $env:CODEORBIT_BUNDLED_PLUGINS_DIR = "{{bundledPluginsDir}}"
                 $input | & $bridge @args
             } else {
                 Write-Error "CodeOrbit Bridge executable is missing: $bridge"

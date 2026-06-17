@@ -30,9 +30,15 @@ public sealed class SourcePluginLoader
     /// <summary>
     /// Gets the bundled plugin directory path.
     /// Bundled plugins are located relative to the application base directory.
+    /// Can be overridden via CODEORBIT_BUNDLED_PLUGINS_DIR environment variable.
     /// </summary>
     public static string GetBundledPluginDirectory()
     {
+        // Allow environment variable override for Bridge.exe to use RuntimeHost's directory
+        var envOverride = Environment.GetEnvironmentVariable("CODEORBIT_BUNDLED_PLUGINS_DIR");
+        if (!string.IsNullOrWhiteSpace(envOverride) && Directory.Exists(envOverride))
+            return envOverride;
+
         // For single-file deployments, Assembly.Location returns empty string
         // Always use AppContext.BaseDirectory which points to the exe directory
         return Path.Combine(AppContext.BaseDirectory, "bundled-plugins");
