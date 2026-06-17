@@ -29,18 +29,13 @@ public sealed class SourcePluginLoader
 
     /// <summary>
     /// Gets the bundled plugin directory path.
-    /// Bundled plugins are located relative to the Core assembly.
+    /// Bundled plugins are located relative to the application base directory.
     /// </summary>
     public static string GetBundledPluginDirectory()
     {
-        // Get the directory where Core assembly is located
-        var assemblyLocation = typeof(SourcePluginLoader).Assembly.Location;
-        var assemblyDir = Path.GetDirectoryName(assemblyLocation);
-
-        if (string.IsNullOrEmpty(assemblyDir))
-            return Path.Combine(AppContext.BaseDirectory, "bundled-plugins");
-
-        return Path.Combine(assemblyDir, "bundled-plugins");
+        // For single-file deployments, Assembly.Location returns empty string
+        // Always use AppContext.BaseDirectory which points to the exe directory
+        return Path.Combine(AppContext.BaseDirectory, "bundled-plugins");
     }
 
     /// <summary>
