@@ -12,35 +12,31 @@ public static class ConfigInstaller
 
     private const string HookScriptName = "CodeOrbit-hook.ps1";
 
-    private const string DeployedBridgeExeName = "CodeOrbit-bridge.exe";
-
     private const string ReleaseBridgeExeName = "CodeOrbit.Bridge.exe";
-
-    private const string UserProfileOverrideEnvironmentVariable = "CodeOrbit_TEST_USERPROFILE";
 
     private const string BridgeSourceOverrideEnvironmentVariable = "CodeOrbit_BRIDGE_SOURCE_PATH";
 
-    private const string BridgeSourceTestOverrideEnvironmentVariable = "CodeOrbit_TEST_BRIDGE_SOURCE_PATH";
-
     private static string UserProfileDirectory =>
-        Environment.GetEnvironmentVariable(UserProfileOverrideEnvironmentVariable) is { Length: > 0 } overridePath
-            ? overridePath
-            : Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
-    private static string CodeOrbitDir =>
-        Path.Combine(UserProfileDirectory, ".CodeOrbit");
+    /// <summary>
+    /// RuntimeHost 所在的目录（解压即用，不再复制到用户目录）
+    /// </summary>
+    public static string RuntimeDirectory => AppContext.BaseDirectory;
 
-    private static string HookScriptPath =>
-        Path.Combine(CodeOrbitDir, HookScriptName);
+    /// <summary>
+    /// Bridge 可执行文件路径（与 RuntimeHost 在同一目录）
+    /// </summary>
+    public static string RuntimeBridgeExePath =>
+        Path.Combine(RuntimeDirectory, ReleaseBridgeExeName);
 
-    public static string RuntimeDirectory => CodeOrbitDir;
+    /// <summary>
+    /// Hook 脚本路径（临时生成，用于测试）
+    /// </summary>
+    public static string RuntimeHookScriptPath =>
+        Path.Combine(RuntimeDirectory, HookScriptName);
 
-    public static string RuntimeHookScriptPath => HookScriptPath;
-
-    public static string RuntimeBridgeExePath => BridgeExePath;
-
-    private static string BridgeExePath =>
-        Path.Combine(CodeOrbitDir, DeployedBridgeExeName);
+    private static string BridgeExePath => RuntimeBridgeExePath;
 
     /// <summary>
     /// Hook 格式枚举
@@ -214,16 +210,20 @@ public static class ConfigInstaller
     // ============================================================
 
     /// <summary>
-    /// 修复 hook 运行时资产：部署 Bridge CLI，并重写指向运行时目录的 PowerShell hook 脚本。
+    /// 修复 hook 运行时资产：确保 Bridge.exe 存在并更新所有已安装 hook 的路径
     /// </summary>
     public static bool RepairRuntimeAssets()
     {
         try
         {
-            Directory.CreateDirectory(CodeOrbitDir);
-            var bridgeReady = EnsureBridgeExecutable();
-            EnsureHookScript();
-            return bridgeReady && AreRuntimeAssetsInstalled();
+            // 确保 Bridge.exe 存在于 RuntimeHost 目录
+            if (!File.Exists(RuntimeBridgeExePath))
+                return false;
+
+            // 自动修复所有已安装的 hook 配置
+            RepairInstalledHookConfigurations();
+
+            return true;
         }
         catch
         {
@@ -232,20 +232,43 @@ public static class ConfigInstaller
     }
 
     /// <summary>
-    /// 修复已经安装过的 CodeOrbit hook 配置。用于应用启动时把旧版本缺失的事件补齐，
-    /// 同时保持用户自己的 hook 条目不变。
+    /// 修复已经安装过的 CodeOrbit hook 配置。
+    /// 用于应用启动时自动更新 hook 路径，确保指向当前 RuntimeHost 目录。
     /// </summary>
     public static bool RepairInstalledHookConfigurations()
     {
         try
         {
-            var runtimeAssetsReady = RepairRuntimeAssets();
             var configRepaired = true;
 
             if (HasAnyCodeOrbitClaudeHook())
                 configRepaired &= InstallClaude();
 
-            return runtimeAssetsReady && configRepaired;
+            if (HasAnyCodeOrbitCodexHook())
+                configRepaired &= InstallCodex();
+
+            // 修复其他已安装的插件 hooks（使用通用插件系统）
+            var loader = new Sources.SourcePluginLoader();
+            var plugins = loader.LoadPlugins();
+
+            foreach (var plugin in plugins)
+            {
+                var sourceKey = plugin.SourceKey;
+
+                // Skip Claude and Codex as they're handled above
+                if (sourceKey.Equals("claude", StringComparison.OrdinalIgnoreCase) ||
+                    sourceKey.Equals("codex", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                // Check if this plugin is installed and repair it
+                if (IsPluginInstalled(sourceKey))
+                {
+                    // Use the generic Install method which will update the hook path
+                    configRepaired &= Install(sourceKey);
+                }
+            }
+
+            return configRepaired;
         }
         catch
         {
@@ -254,122 +277,16 @@ public static class ConfigInstaller
     }
 
     public static bool AreRuntimeAssetsInstalled() =>
-        File.Exists(HookScriptPath) && File.Exists(BridgeExePath);
+        File.Exists(RuntimeBridgeExePath);
 
-    private static bool EnsureBridgeExecutable()
-    {
-        var source = LocateBridgeExecutable();
-        if (source == null)
-            return File.Exists(BridgeExePath);
-
-        if (Path.GetFullPath(source).Equals(Path.GetFullPath(BridgeExePath), StringComparison.OrdinalIgnoreCase))
-            return File.Exists(BridgeExePath);
-
-        if (File.Exists(BridgeExePath))
-        {
-            var sourceInfo = new FileInfo(source);
-            var destinationInfo = new FileInfo(BridgeExePath);
-            if (destinationInfo.Length == sourceInfo.Length && destinationInfo.LastWriteTimeUtc >= sourceInfo.LastWriteTimeUtc)
-            {
-                CopyBridgeSidecarFiles(source);
-                return true;
-            }
-        }
-
-        Directory.CreateDirectory(CodeOrbitDir);
-        File.Copy(source, BridgeExePath, overwrite: true);
-        CopyBridgeSidecarFiles(source);
-        return true;
-    }
-
-    private static void CopyBridgeSidecarFiles(string sourceBridgePath)
-    {
-        var sourceDirectory = Path.GetDirectoryName(sourceBridgePath);
-        if (sourceDirectory == null)
-            return;
-
-        foreach (var file in Directory.EnumerateFiles(sourceDirectory))
-        {
-            var fileName = Path.GetFileName(file);
-            if (fileName.Equals(ReleaseBridgeExeName, StringComparison.OrdinalIgnoreCase) ||
-                fileName.Equals(DeployedBridgeExeName, StringComparison.OrdinalIgnoreCase))
-                continue;
-
-            var extension = Path.GetExtension(fileName);
-            if (!extension.Equals(".dll", StringComparison.OrdinalIgnoreCase) &&
-                !extension.Equals(".json", StringComparison.OrdinalIgnoreCase) &&
-                !extension.Equals(".pdb", StringComparison.OrdinalIgnoreCase))
-                continue;
-
-            File.Copy(file, Path.Combine(CodeOrbitDir, fileName), overwrite: true);
-        }
-    }
-
-    private static string? LocateBridgeExecutable()
-    {
-        var testOverridePath = Environment.GetEnvironmentVariable(BridgeSourceTestOverrideEnvironmentVariable);
-        if (!string.IsNullOrWhiteSpace(testOverridePath))
-            return File.Exists(testOverridePath) ? testOverridePath : null;
-
-        var overridePath = Environment.GetEnvironmentVariable(BridgeSourceOverrideEnvironmentVariable);
-        if (!string.IsNullOrWhiteSpace(overridePath) && File.Exists(overridePath))
-            return overridePath;
-
-        var baseDirectory = AppContext.BaseDirectory;
-        foreach (var candidate in EnumerateBridgeCandidates(baseDirectory))
-        {
-            if (File.Exists(candidate))
-                return candidate;
-        }
-
-        return null;
-    }
-
-    private static IEnumerable<string> EnumerateBridgeCandidates(string baseDirectory)
-    {
-        var directory = new DirectoryInfo(baseDirectory);
-        while (directory != null)
-        {
-            yield return Path.Combine(directory.FullName, ReleaseBridgeExeName);
-            yield return Path.Combine(directory.FullName, DeployedBridgeExeName);
-
-            yield return Path.Combine(directory.FullName, "src", "CodeOrbit.Bridge", "bin", "Release", "net8.0", "win-x64", "publish", ReleaseBridgeExeName);
-            yield return Path.Combine(directory.FullName, "src", "CodeOrbit.Bridge", "bin", "Debug", "net8.0", "win-x64", "publish", ReleaseBridgeExeName);
-            yield return Path.Combine(directory.FullName, "src", "CodeOrbit.Bridge", "bin", "Release", "net8.0", "win-x64", ReleaseBridgeExeName);
-            yield return Path.Combine(directory.FullName, "src", "CodeOrbit.Bridge", "bin", "Debug", "net8.0", "win-x64", ReleaseBridgeExeName);
-            yield return Path.Combine(directory.FullName, "src", "CodeOrbit.Bridge", "bin", "Release", "net8.0", ReleaseBridgeExeName);
-            yield return Path.Combine(directory.FullName, "src", "CodeOrbit.Bridge", "bin", "Debug", "net8.0", ReleaseBridgeExeName);
-
-            directory = directory.Parent;
-        }
-    }
-
-    private static void EnsureHookScript()
-    {
-        Directory.CreateDirectory(CodeOrbitDir);
-
-        var bridgePath = BridgeExePath;
-        var bundledPluginsDir = Path.Combine(Path.GetDirectoryName(bridgePath)!, "bundled-plugins");
-        var script = $$"""
-            $bridge = "{{bridgePath}}"
-            if (Test-Path $bridge) {
-                $env:CODEORBIT_BUNDLED_PLUGINS_DIR = "{{bundledPluginsDir}}"
-                $input | & $bridge @args
-            } else {
-                Write-Error "CodeOrbit Bridge executable is missing: $bridge"
-                exit 0
-            }
-            """;
-
-        File.WriteAllText(HookScriptPath, script);
-    }
-
+    /// <summary>
+    /// 获取当前 RuntimeHost 目录的 hook 命令
+    /// </summary>
     private static string GetHookCommand(string? source = null)
     {
-        // 直接调用 bridge.exe，避免 PowerShell `$input` 中转破坏二进制 stdin（CRLF/CR、JSON 转义等）。
-        // Claude Code / Codex 等都把 hook command 作为 shell 字符串执行，Windows 上 cmd /c 会把它交给 cmd 解释，
-        // bridge.exe 是 PE 可执行文件，直接拼路径即可，stdin 由调用方原样喂入。
-        var command = $"\"{BridgeExePath}\"";
+        // 直接使用 RuntimeHost 目录下的 Bridge.exe
+        var bridgePath = RuntimeBridgeExePath;
+        var command = $"\"{bridgePath}\"";
         return string.IsNullOrWhiteSpace(source) ? command : $"{command} --source {source}";
     }
 
@@ -739,6 +656,22 @@ public static class ConfigInstaller
         }
         WriteJson(path, json);
         return true;
+    }
+
+    private static bool HasAnyCodeOrbitCodexHook()
+    {
+        var path = GetCodexHooksPath();
+        if (!File.Exists(path)) return false;
+
+        try
+        {
+            var json = ReadJson(path) as JsonObject;
+            return json?["hooks"] is JsonObject hooks && ContainsCodeOrbitCodexHook(hooks);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static bool IsInstalledCodex()
