@@ -13,7 +13,7 @@ This repository owns:
 - `CodeOrbit.Bridge`: short-lived CLI hook bridge.
 - Tests, docs, and external display samples.
 
-The Windows HUD is a display client. It should consume this through `CodeOrbit.Contracts` plus RuntimeHost/Bridge executable artifacts, not by compiling against internals.
+The Windows HUD is a display client. It should consume this through `CodeOrbit.Contracts` plus RuntimeHost/Bridge executable artifacts, not by compiling against internals. The HUD implementation lives in [CodeIsland-Windows](https://github.com/KelseySking/CodeIsland-Windows).
 
 ## Topology
 
@@ -49,7 +49,7 @@ CodeOrbit supports custom CLI sources through a **plugin system**. This allows y
 
 - **Automatic CLI Detection**: Plugins can define process names, environment variables, and path patterns to automatically detect which CLI is running
 - **Hook Installation**: Plugins specify how to install hooks into the CLI's configuration files
-- **Bundled Plugins**: Ships with built-in support for Claude Code, Codex, and more
+- **Bundled Plugins**: Ships with built-in support for 19 CLI sources, including Claude Code, Codex CLI, Gemini CLI, Cursor, Kiro, Qwen Code, GitHub Copilot, and more
 - **User Plugins**: Drop JSON files into `%AppData%\CodeOrbit\sources\` to register custom CLIs
 
 ### Quick Start
@@ -93,12 +93,29 @@ bool success = ConfigInstaller.InstallPlugin("my-cli");
 
 ### Bundled Plugins
 
-Ships with these built-in CLI plugins:
+Ships with these built-in CLI plugins from `bundled-plugins/`:
 
-- **Claude Code** (`claude.json`) - 12 events, claude-matcher format
-- **Codex CLI** (`codex.json`) - 7 events, nested format with config.toml support
-
-More bundled plugins coming soon.
+| CLI | Source key / plugin file | Hook format | Events |
+| --- | --- | --- | ---: |
+| AntiGravity | `antigravity` / `antigravity.json` | `claude-matcher` | 12 |
+| Claude Code | `claude` / `claude.json` | `claude-matcher` | 12 |
+| Cline | `cline` / `cline.json` | `cline` | 5 |
+| CodeBuddy | `codebuddy` / `codebuddy.json` | `claude-matcher` | 12 |
+| Codex CLI | `codex` / `codex.json` | `codex` | 7 |
+| Cursor | `cursor` / `cursor.json` | `flat` | 5 |
+| Factory | `droid` / `droid.json` | `claude-matcher` | 12 |
+| Gemini CLI | `gemini` / `gemini.json` | `nested` | 4 |
+| GitHub Copilot | `copilot` / `copilot.json` | `copilot` | 7 |
+| Hermes | `hermes` / `hermes.json` | `nested` | 6 |
+| Kimi Code | `kimi` / `kimi.json` | `nested` | 6 |
+| Kiro | `kiro` / `kiro.json` | `nested` | 6 |
+| OpenCode | `opencode` / `opencode.json` | `nested` | 6 |
+| Pi | `pi` / `pi.json` | `nested` | 6 |
+| Qoder | `qoder` / `qoder.json` | `claude-matcher` | 12 |
+| Qwen Code | `qwen` / `qwen.json` | `claude-matcher` | 12 |
+| StepFun | `stepfun` / `stepfun.json` | `claude-matcher` | 12 |
+| Trae | `trae` / `trae.json` | `flat` | 7 |
+| WorkBuddy | `workbuddy` / `workbuddy.json` | `claude-matcher` | 12 |
 
 ## API And Display Clients
 
@@ -131,3 +148,5 @@ Create a ZIP with `CodeOrbit.RuntimeHost.exe`, `CodeOrbit.Bridge.exe`, and `runt
 ```
 
 The Windows HUD can download update manifests and promote the ZIP payload into its local cache.
+
+<center>This project has been shared on the [LINUX DO](https://linux.do).</center>
