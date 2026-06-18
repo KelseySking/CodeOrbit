@@ -29,6 +29,7 @@ public sealed class CodeOrbitRuntimeHostOptions
 
 public sealed class CodeOrbitRuntimeHost : IAsyncDisposable, IDisposable
 {
+    private static readonly TimeSpan IdleSessionTimeout = TimeSpan.FromMinutes(30);
     private static readonly TimeSpan ProcessMonitorInterval = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan ProcessStartTimeTolerance = TimeSpan.FromSeconds(2);
     private readonly CodeOrbitRuntimeHostOptions _options;
@@ -129,7 +130,10 @@ public sealed class CodeOrbitRuntimeHost : IAsyncDisposable, IDisposable
         _processMonitorTimer = new System.Threading.Timer(_ =>
         {
             if (_started)
+            {
                 HubState.RemoveExitedSessions(IsTrackedProcessExited);
+                HubState.RemoveIdleSessions(IdleSessionTimeout, DateTime.UtcNow);
+            }
         }, null, ProcessMonitorInterval, ProcessMonitorInterval);
     }
 

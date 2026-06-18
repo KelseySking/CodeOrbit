@@ -96,9 +96,73 @@ public class CodeOrbitHubStateTests
         Assert.Empty(state.GetPendingActions());
     }
 
+    [Fact]
+    public void RemoveIdleSessions_RemovesSessionsPastTimeout()
+    {
+        var state = new CodeOrbitHubState();
+        var now = DateTime.UtcNow;
+        var old = MakeEvent(new Dictionary<string, object?>
+        {
+            ["hook_event_name"] = "SessionStart",
+            ["session_id"] = "old-session"
+        });
+        var fresh = MakeEvent(new Dictionary<string, object?>
+        {
+            ["hook_event_name"] = "SessionStart",
+            ["session_id"] = "fresh-session"
+        });
+
+        state.HandleEvent(old);
+        state.HandleEvent(fresh);
+        SetLastUpdatedAt(state, "old-session", now - TimeSpan.FromMinutes(31));
+        SetLastUpdatedAt(state, "fresh-session", now - TimeSpan.FromMinutes(29));
+
+        Assert.True(state.RemoveIdleSessions(TimeSpan.FromMinutes(30), now));
+
+        var session = Assert.Single(state.GetSessions());
+        Assert.Equal("fresh-session", session.SessionId);
+    }
+
+    [Fact]
+    public async Task RemoveIdleSessions_CompletesPendingHookResponse()
+    {
+        var state = new CodeOrbitHubState();
+        var now = DateTime.UtcNow;
+        var evt = MakeEvent(new Dictionary<string, object?>
+        {
+            ["hook_event_name"] = "PreToolUse",
+            ["session_id"] = "idle-session",
+            ["tool_name"] = "Bash",
+            ["tool_input"] = new { command = "dotnet test", requires_approval = true }
+        });
+
+        var responseTask = state.HandleBlockingEventAsync(evt, TimeSpan.FromMinutes(5), CancellationToken.None);
+        Assert.Single(state.GetPendingActions());
+        SetLastUpdatedAt(state, "idle-session", now - TimeSpan.FromMinutes(31));
+
+        Assert.True(state.RemoveIdleSessions(TimeSpan.FromMinutes(30), now));
+
+        var response = await responseTask.WaitAsync(TimeSpan.FromSeconds(5));
+        using var doc = JsonDocument.Parse(response);
+        Assert.Equal("deny", doc.RootElement
+            .GetProperty("hookSpecificOutput")
+            .GetProperty("permissionDecision")
+            .GetString());
+        Assert.Empty(state.GetPendingActions());
+        Assert.Empty(state.GetSessions());
+    }
+
     private static HookEvent MakeEvent(Dictionary<string, object?> payload, string source = "claude")
     {
         using var doc = JsonDocument.Parse(JsonSerializer.Serialize(payload));
         return HookEvent.FromJson(doc.RootElement, source)!;
+    }
+
+    private static void SetLastUpdatedAt(CodeOrbitHubState state, string sessionId, DateTime lastUpdatedAtUtc)
+    {
+        var field = typeof(CodeOrbitHubState).GetField("_sessions", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Could not access sessions for test setup.");
+        var sessions = (Dictionary<string, SessionSnapshot>)field.GetValue(state)!;
+        sessions[sessionId].LastUpdatedAt = DateTime.SpecifyKind(lastUpdatedAtUtc, DateTimeKind.Utc);
     }
 }

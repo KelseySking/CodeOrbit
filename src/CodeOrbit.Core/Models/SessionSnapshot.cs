@@ -8,6 +8,8 @@ namespace CodeOrbit.Core.Models;
 /// </summary>
 public class SessionSnapshot
 {
+    private const int MaxToolHistoryEntries = 50;
+
     public string SessionId { get; set; } = "";
     public string Source { get; set; } = "";
     public string? ProjectName { get; set; }
@@ -43,7 +45,7 @@ public class SessionSnapshot
         CurrentToolName = CurrentToolName,
         CurrentToolDescription = CurrentToolDescription,
         CreatedAt = CreatedAt,
-        LastUpdatedAt = DateTime.UtcNow,
+        LastUpdatedAt = LastUpdatedAt,
         Pid = Pid,
         TrackedProcessStartedAtUtc = TrackedProcessStartedAtUtc,
         ToolHistory = new List<ToolHistoryEntry>(ToolHistory),
@@ -204,7 +206,7 @@ public class SessionSnapshot
         var toolName = evt.ToolName ?? state.CurrentToolName;
         if (!string.IsNullOrWhiteSpace(toolName))
         {
-            clone.ToolHistory.Add(new ToolHistoryEntry
+            AddToolHistory(clone, new ToolHistoryEntry
             {
                 ToolName = toolName,
                 Timestamp = DateTime.UtcNow,
@@ -260,6 +262,7 @@ public class SessionSnapshot
     private static SessionSnapshot ApplyEventMetadata(SessionSnapshot state, HookEvent evt)
     {
         var clone = state.Clone();
+        clone.LastUpdatedAt = DateTime.UtcNow;
 
         if (IsKnownSource(evt.Source))
             clone.Source = evt.Source!;
@@ -375,6 +378,16 @@ public class SessionSnapshot
             snapshot.LastUserPrompt = message.Text;
         else
             snapshot.LastAssistantMessage = message.Text;
+    }
+
+    private static void AddToolHistory(SessionSnapshot snapshot, ToolHistoryEntry entry, int maxEntries = MaxToolHistoryEntries)
+    {
+        if (maxEntries < 1)
+            throw new ArgumentOutOfRangeException(nameof(maxEntries));
+
+        snapshot.ToolHistory.Add(entry);
+        while (snapshot.ToolHistory.Count > maxEntries)
+            snapshot.ToolHistory.RemoveAt(0);
     }
 
     private static string? FormatToolDescription(HookEvent evt)

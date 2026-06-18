@@ -10,6 +10,7 @@ namespace CodeOrbit.Hub;
 public sealed class CodeOrbitRealtimeHub
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly TimeSpan SendTimeout = TimeSpan.FromSeconds(5);
     private readonly ConcurrentDictionary<Guid, WebSocket> _sockets = new();
     private readonly EventLogger? _logger;
 
@@ -77,12 +78,31 @@ public sealed class CodeOrbitRealtimeHub
 
             try
             {
-                await socket.SendAsync(payload, WebSocketMessageType.Text, endOfMessage: true, ct);
+                using var sendCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                sendCts.CancelAfter(SendTimeout);
+                await socket.SendAsync(payload, WebSocketMessageType.Text, endOfMessage: true, sendCts.Token);
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                _sockets.TryRemove(id, out _);
+                TryAbort(socket);
             }
             catch
             {
                 _sockets.TryRemove(id, out _);
+                TryAbort(socket);
             }
+        }
+    }
+
+    private static void TryAbort(WebSocket socket)
+    {
+        try
+        {
+            socket.Abort();
+        }
+        catch
+        {
         }
     }
 }

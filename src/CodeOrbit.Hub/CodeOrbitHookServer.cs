@@ -10,10 +10,12 @@ namespace CodeOrbit.Hub;
 public sealed class CodeOrbitHookServer : IDisposable
 {
     private const int AcceptParallelism = 4;
+    private static readonly TimeSpan ReadMessageTimeout = TimeSpan.FromSeconds(10);
     private readonly CodeOrbitHubState _hubState;
     private readonly Func<TimeSpan> _timeoutProvider;
     private readonly EventLogger? _logger;
     private readonly string _pipeName;
+    private readonly TimeSpan _readMessageTimeout;
     private CancellationTokenSource? _cts;
 
     public CodeOrbitHookServer(CodeOrbitHubState hubState, Func<TimeSpan> timeoutProvider, EventLogger? logger = null)
@@ -22,11 +24,17 @@ public sealed class CodeOrbitHookServer : IDisposable
     }
 
     internal CodeOrbitHookServer(CodeOrbitHubState hubState, Func<TimeSpan> timeoutProvider, EventLogger? logger, string pipeName)
+        : this(hubState, timeoutProvider, logger, pipeName, ReadMessageTimeout)
+    {
+    }
+
+    internal CodeOrbitHookServer(CodeOrbitHubState hubState, Func<TimeSpan> timeoutProvider, EventLogger? logger, string pipeName, TimeSpan readMessageTimeout)
     {
         _hubState = hubState;
         _timeoutProvider = timeoutProvider;
         _logger = logger;
         _pipeName = pipeName;
+        _readMessageTimeout = readMessageTimeout;
     }
 
     public Task StartAsync()
@@ -73,7 +81,9 @@ public sealed class CodeOrbitHookServer : IDisposable
     {
         try
         {
-            var json = await MessageProtocol.ReadMessageAsync(pipe, ct);
+            using var readCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            readCts.CancelAfter(_readMessageTimeout);
+            var json = await MessageProtocol.ReadMessageAsync(pipe, readCts.Token);
             if (string.IsNullOrWhiteSpace(json))
             {
                 await TryWriteResponseAsync(pipe, "{}", ct);
@@ -113,6 +123,13 @@ public sealed class CodeOrbitHookServer : IDisposable
             }
 
             LogHookResponse(evt, blocking, response);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            _logger?.Write("CodeOrbitHookServer", "read-timeout", new Dictionary<string, string?>
+            {
+                ["timeoutMs"] = _readMessageTimeout.TotalMilliseconds.ToString("0")
+            });
         }
         catch (Exception ex)
         {

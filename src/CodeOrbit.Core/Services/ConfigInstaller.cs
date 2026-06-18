@@ -210,10 +210,22 @@ public static class ConfigInstaller
     // ============================================================
 
     /// <summary>
+    /// 防止 RepairRuntimeAssets 与 RepairInstalledHookConfigurations 之间形成递归。
+    /// 后者会遍历已安装插件并调用 Install(source)，而 Install 又回到 RepairRuntimeAssets，
+    /// 形成 RepairRuntimeAssets → RepairInstalledHookConfigurations → Install → RepairRuntimeAssets
+    /// 的无限递归，触发 StackOverflowException（"无法创建新的堆栈防护页面"），使 RuntimeHost 启动即崩溃。
+    /// 进入时置位；正在修复期间的嵌套调用直接返回 true（assets 由最外层负责，幂等）。
+    /// </summary>
+    private static int _repairingRuntimeAssets;
+
+    /// <summary>
     /// 修复 hook 运行时资产：确保 Bridge.exe 存在并更新所有已安装 hook 的路径
     /// </summary>
     public static bool RepairRuntimeAssets()
     {
+        if (System.Threading.Interlocked.CompareExchange(ref _repairingRuntimeAssets, 1, 0) != 0)
+            return true;
+
         try
         {
             // 确保 Bridge.exe 存在于 RuntimeHost 目录
@@ -228,6 +240,10 @@ public static class ConfigInstaller
         catch
         {
             return false;
+        }
+        finally
+        {
+            System.Threading.Volatile.Write(ref _repairingRuntimeAssets, 0);
         }
     }
 

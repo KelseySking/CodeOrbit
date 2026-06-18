@@ -246,6 +246,32 @@ public sealed class CodeOrbitHubState : ICodeOrbitHubState
         return removedAny;
     }
 
+    public bool RemoveIdleSessions(TimeSpan idleTimeout, DateTime utcNow, string reason = "session idle timeout")
+    {
+        if (idleTimeout <= TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(nameof(idleTimeout));
+
+        var cutoff = utcNow - idleTimeout;
+        string[] idleSessionIds;
+        lock (_gate)
+        {
+            idleSessionIds = _sessions.Values
+                .Where(session => IsIdleSession(session, cutoff))
+                .Select(static session => session.SessionId)
+                .ToArray();
+
+            if (idleSessionIds.Length == 0)
+                return false;
+
+            foreach (var sessionId in idleSessionIds)
+                RemoveSessionLocked(sessionId, reason);
+        }
+
+        if (idleSessionIds.Length > 0)
+            NotifyStateChanged(idleSessionIds[0], affectedActionId: null, normalizedEventName: "SessionEnd", effect: new SideEffect.None(), realtimeEventType: "session.removed");
+        return true;
+    }
+
     private void HandleEventCore(HookEvent evt, TaskCompletionSource<string>? blockingCompletion)
     {
         string? sessionId;
@@ -600,6 +626,16 @@ public sealed class CodeOrbitHubState : ICodeOrbitHubState
     private static bool HasCompletionContent(SessionSnapshot session) =>
         !string.IsNullOrWhiteSpace(session.CompletionText) ||
         !string.IsNullOrWhiteSpace(session.LastAssistantMessage);
+
+    private static bool IsIdleSession(SessionSnapshot session, DateTime cutoffUtc) =>
+        AsUtcDateTime(session.LastUpdatedAt) <= cutoffUtc;
+
+    private static DateTime AsUtcDateTime(DateTime value) => value.Kind switch
+    {
+        DateTimeKind.Utc => value,
+        DateTimeKind.Local => value.ToUniversalTime(),
+        _ => DateTime.SpecifyKind(value, DateTimeKind.Utc)
+    };
 
     private static SessionSnapshot ApplyTranscriptMessages(SessionSnapshot? existing, SessionSnapshot snapshot)
     {

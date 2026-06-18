@@ -223,7 +223,7 @@ public class SessionSnapshotTests
     }
 
     [Fact]
-    public void ToolHistory_Accumulates()
+    public void ToolHistory_KeepsRecentEntries()
     {
         var events = new[] { "Bash", "Read", "Edit", "Write" };
         SessionSnapshot? state = null;
@@ -237,6 +237,41 @@ public class SessionSnapshotTests
         }
 
         Assert.Equal(4, state!.ToolHistory.Count);
+    }
+
+    [Fact]
+    public void ToolHistory_IsBoundedToAvoidUnboundedRuntimeGrowth()
+    {
+        SessionSnapshot? state = null;
+
+        for (var i = 0; i < 75; i++)
+        {
+            var tool = $"Tool{i:00}";
+            var pre = MakeEvent("PreToolUse", toolName: tool);
+            (state, _) = SessionSnapshot.ReduceEvent(state, pre);
+            var post = MakeEvent("PostToolUse", toolName: tool);
+            (state, _) = SessionSnapshot.ReduceEvent(state, post);
+        }
+
+        Assert.NotNull(state);
+        Assert.Equal(50, state!.ToolHistory.Count);
+        Assert.Equal("Tool25", state.ToolHistory[0].ToolName);
+        Assert.Equal("Tool74", state.ToolHistory[^1].ToolName);
+    }
+
+    [Fact]
+    public void Clone_PreservesLastUpdatedAt()
+    {
+        var lastUpdatedAt = new DateTime(2026, 6, 18, 1, 2, 3, DateTimeKind.Utc);
+        var snapshot = new SessionSnapshot
+        {
+            SessionId = "test-123",
+            LastUpdatedAt = lastUpdatedAt
+        };
+
+        var clone = snapshot.Clone();
+
+        Assert.Equal(lastUpdatedAt, clone.LastUpdatedAt);
     }
 
     [Fact]
