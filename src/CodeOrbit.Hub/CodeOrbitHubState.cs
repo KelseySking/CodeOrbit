@@ -26,7 +26,8 @@ public sealed class HubStateChangedEventArgs : EventArgs
         string? affectedActionId,
         string? normalizedEventName,
         SideEffect effect,
-        string? realtimeEventType)
+        string? realtimeEventType,
+        PendingResolutionDto? resolution = null)
     {
         Sessions = sessions;
         PendingActions = pendingActions;
@@ -35,6 +36,7 @@ public sealed class HubStateChangedEventArgs : EventArgs
         NormalizedEventName = normalizedEventName;
         Effect = effect;
         RealtimeEventType = realtimeEventType;
+        Resolution = resolution;
     }
 
     public IReadOnlyList<SessionSnapshot> Sessions { get; }
@@ -44,6 +46,7 @@ public sealed class HubStateChangedEventArgs : EventArgs
     public string? NormalizedEventName { get; }
     public SideEffect Effect { get; }
     public string? RealtimeEventType { get; }
+    public PendingResolutionDto? Resolution { get; }
 }
 
 public sealed record HubRealtimeEventArgs(string Type, object? Data);
@@ -54,6 +57,8 @@ public sealed class CodeOrbitHubState : ICodeOrbitHubState
     private readonly Dictionary<string, SessionSnapshot> _sessions = new(StringComparer.Ordinal);
     private readonly Queue<PendingPermission> _permissionQueue = new();
     private readonly Queue<PendingQuestion> _questionQueue = new();
+    private readonly Queue<PendingResolutionDto> _history = new();
+    private const int MaxHistoryEntries = 200;
     private readonly Func<PermissionRequest, bool>? _shouldAutoApprove;
 
     public CodeOrbitHubState(Func<PermissionRequest, bool>? shouldAutoApprove = null)
@@ -79,6 +84,20 @@ public sealed class CodeOrbitHubState : ICodeOrbitHubState
 
     public PendingActionDto? GetPendingAction(string actionId) =>
         GetPendingActionSnapshot(actionId) is { } pending ? MapPendingAction(pending) : null;
+
+    public IReadOnlyList<PendingResolutionDto> GetPendingHistory(int limit = 100)
+    {
+        if (limit <= 0)
+            return [];
+
+        lock (_gate)
+        {
+            var snapshot = _history.ToArray();
+            if (snapshot.Length > limit)
+                snapshot = snapshot[^limit..];
+            return snapshot;
+        }
+    }
 
     public IReadOnlyList<SessionSnapshot> GetSessionSnapshots()
     {
@@ -126,8 +145,31 @@ public sealed class CodeOrbitHubState : ICodeOrbitHubState
         }
         catch (TimeoutException)
         {
-            if (RemoveCompletion(completion))
+            if (RemoveCompletion(completion, out var timedOutActionId, out var timedOutSessionId, out var timedOutKind))
+            {
+                var timeoutResolution = new PendingResolutionDto(
+                    timedOutActionId,
+                    timedOutKind,
+                    timedOutSessionId,
+                    Source: null,
+                    Decision: "timeout",
+                    Actor: null,
+                    Reason: "timeout",
+                    ResolvedAtUtc: DateTimeOffset.UtcNow);
+                lock (_gate)
+                    RecordHistoryLocked(timeoutResolution);
+                NotifyStateChanged(
+                    affectedSessionId: timedOutSessionId,
+                    affectedActionId: timedOutActionId,
+                    normalizedEventName: null,
+                    effect: new SideEffect.None(),
+                    realtimeEventType: "pending.resolved",
+                    timeoutResolution);
+            }
+            else
+            {
                 NotifyStateChanged(affectedSessionId: evt.SessionId, affectedActionId: null, normalizedEventName: null, effect: new SideEffect.None(), realtimeEventType: "pending.updated");
+            }
 
             return IsQuestionEvent(evt)
                 ? HookResponseBuilder.BuildQuestionDismissResponse(evt, "timeout")
@@ -161,25 +203,35 @@ public sealed class CodeOrbitHubState : ICodeOrbitHubState
         return true;
     }
 
-    public bool AllowPermission(string actionId, bool always) =>
-        ResolvePermission(actionId, pending => HookResponseBuilder.BuildPermissionAllowResponse(pending.Event, pending.Request, always));
+    public bool AllowPermission(string actionId, bool always, string? actor = null) =>
+        ResolvePermission(actionId,
+            pending => HookResponseBuilder.BuildPermissionAllowResponse(pending.Event, pending.Request, always),
+            decision: always ? "allow-always" : "allow",
+            actor,
+            reason: null);
 
-    public bool DenyPermission(string actionId, string reason) =>
-        ResolvePermission(actionId, pending => HookResponseBuilder.BuildPermissionDenyResponse(pending.Event, reason));
+    public bool DenyPermission(string actionId, string reason, string? actor = null) =>
+        ResolvePermission(actionId,
+            pending => HookResponseBuilder.BuildPermissionDenyResponse(pending.Event, reason),
+            decision: "deny",
+            actor,
+            reason);
 
     public bool AnswerQuestion(string actionId, QuestionAnswerRequest request)
     {
+        var actor = request.Actor;
         if (request.Answers is { Count: > 0 })
-            return ResolveQuestionWithAnswerMap(actionId, request.Answers);
+            return ResolveQuestionWithAnswerMap(actionId, request.Answers, actor);
 
-        return AnswerCurrentQuestion(actionId, string.IsNullOrWhiteSpace(request.Answer) ? [] : [request.Answer], out _);
+        return AnswerCurrentQuestion(actionId, string.IsNullOrWhiteSpace(request.Answer) ? [] : [request.Answer], out _, actor);
     }
 
-    public bool AnswerCurrentQuestion(string actionId, IReadOnlyList<string> answers, out bool resolved)
+    public bool AnswerCurrentQuestion(string actionId, IReadOnlyList<string> answers, out bool resolved, string? actor = null)
     {
         resolved = false;
         PendingQuestion? completed = null;
         var realtimeEventType = "pending.updated";
+        PendingResolutionDto? resolution = null;
 
         lock (_gate)
         {
@@ -200,15 +252,24 @@ public sealed class CodeOrbitHubState : ICodeOrbitHubState
                 completed = pending;
                 resolved = true;
                 realtimeEventType = "pending.resolved";
+                resolution = new PendingResolutionDto(
+                    pending.ActionId,
+                    Kind: "question",
+                    pending.Question.SessionId,
+                    Source: GetSessionSourceKey(GetSessionLocked(pending.Question.SessionId)),
+                    Decision: "answered",
+                    actor,
+                    Reason: null,
+                    ResolvedAtUtc: DateTimeOffset.UtcNow);
             }
         }
 
         completed?.Completion.TrySetResult(BuildQuestionAnswerResponse(completed));
-        NotifyStateChanged(affectedSessionId: completed?.Question.SessionId, affectedActionId: actionId, normalizedEventName: null, effect: new SideEffect.None(), realtimeEventType);
+        NotifyStateChanged(completed?.Question.SessionId, actionId, normalizedEventName: null, effect: new SideEffect.None(), realtimeEventType, resolution);
         return true;
     }
 
-    public bool DismissQuestion(string actionId, string reason)
+    public bool DismissQuestion(string actionId, string reason, string? actor = null)
     {
         PendingQuestion? pending;
         lock (_gate)
@@ -219,7 +280,16 @@ public sealed class CodeOrbitHubState : ICodeOrbitHubState
         }
 
         pending.Completion.TrySetResult(HookResponseBuilder.BuildQuestionDismissResponse(pending.Event, reason));
-        NotifyStateChanged(pending.Question.SessionId, actionId, normalizedEventName: null, effect: new SideEffect.None(), realtimeEventType: "pending.resolved");
+        var resolution = new PendingResolutionDto(
+            pending.ActionId,
+            Kind: "question",
+            pending.Question.SessionId,
+            Source: GetSessionSourceKey(GetSessionLocked(pending.Question.SessionId)),
+            Decision: "dismissed",
+            actor,
+            reason,
+            ResolvedAtUtc: DateTimeOffset.UtcNow);
+        NotifyStateChanged(pending.Question.SessionId, actionId, normalizedEventName: null, effect: new SideEffect.None(), realtimeEventType: "pending.resolved", resolution);
         return true;
     }
 
@@ -320,24 +390,37 @@ public sealed class CodeOrbitHubState : ICodeOrbitHubState
         NotifyStateChanged(sessionId, affectedActionId: null, normalizedEventName, effect, ToRealtimeEventType(normalizedEventName, effect));
     }
 
-    private bool ResolvePermission(string actionId, Func<PendingPermission, string> responseFactory)
+    private bool ResolvePermission(string actionId, Func<PendingPermission, string> responseFactory, string decision, string? actor, string? reason)
     {
         PendingPermission? pending;
+        PendingResolutionDto? resolution;
         lock (_gate)
         {
             pending = FindPermissionByIdLocked(actionId);
             if (pending == null || !RemovePermissionByIdLocked(actionId))
                 return false;
+
+            resolution = new PendingResolutionDto(
+                pending.ActionId,
+                Kind: "permission",
+                pending.Request.SessionId,
+                Source: GetSessionSourceKey(GetSessionLocked(pending.Request.SessionId)),
+                decision,
+                actor,
+                reason,
+                ResolvedAtUtc: DateTimeOffset.UtcNow);
+            RecordHistoryLocked(resolution);
         }
 
         pending.Completion.TrySetResult(responseFactory(pending));
-        NotifyStateChanged(pending.Request.SessionId, actionId, normalizedEventName: null, effect: new SideEffect.None(), realtimeEventType: "pending.resolved");
+        NotifyStateChanged(pending.Request.SessionId, actionId, normalizedEventName: null, effect: new SideEffect.None(), realtimeEventType: "pending.resolved", resolution);
         return true;
     }
 
-    private bool ResolveQuestionWithAnswerMap(string actionId, IReadOnlyDictionary<string, IReadOnlyList<string>> answers)
+    private bool ResolveQuestionWithAnswerMap(string actionId, IReadOnlyDictionary<string, IReadOnlyList<string>> answers, string? actor)
     {
         PendingQuestion? pending;
+        PendingResolutionDto? resolution;
         lock (_gate)
         {
             pending = FindQuestionByIdLocked(actionId);
@@ -353,15 +436,36 @@ public sealed class CodeOrbitHubState : ICodeOrbitHubState
 
             if (pending.Answers.Count == 0 || !RemoveQuestionByIdLocked(actionId))
                 return false;
+
+            resolution = new PendingResolutionDto(
+                pending.ActionId,
+                Kind: "question",
+                pending.Question.SessionId,
+                Source: GetSessionSourceKey(GetSessionLocked(pending.Question.SessionId)),
+                Decision: "answered",
+                actor,
+                Reason: null,
+                ResolvedAtUtc: DateTimeOffset.UtcNow);
+            RecordHistoryLocked(resolution);
         }
 
         pending.Completion.TrySetResult(BuildQuestionAnswerResponse(pending));
-        NotifyStateChanged(pending.Question.SessionId, actionId, normalizedEventName: null, effect: new SideEffect.None(), realtimeEventType: "pending.resolved");
+        NotifyStateChanged(pending.Question.SessionId, actionId, normalizedEventName: null, effect: new SideEffect.None(), realtimeEventType: "pending.resolved", resolution);
         return true;
     }
 
-    private bool RemoveCompletion(TaskCompletionSource<string> completion)
+    private void RecordHistoryLocked(PendingResolutionDto resolution)
     {
+        _history.Enqueue(resolution);
+        while (_history.Count > MaxHistoryEntries)
+            _history.Dequeue();
+    }
+
+    private bool RemoveCompletion(TaskCompletionSource<string> completion, out string? actionId, out string? sessionId, out string? kind)
+    {
+        actionId = null;
+        sessionId = null;
+        kind = null;
         var removed = false;
         lock (_gate)
         {
@@ -370,9 +474,16 @@ public sealed class CodeOrbitHubState : ICodeOrbitHubState
             foreach (var pending in permissions)
             {
                 if (pending.Completion == completion)
+                {
                     removed = true;
+                    actionId = pending.ActionId;
+                    sessionId = pending.Request.SessionId;
+                    kind = "permission";
+                }
                 else
+                {
                     _permissionQueue.Enqueue(pending);
+                }
             }
 
             var questions = _questionQueue.ToArray();
@@ -380,9 +491,16 @@ public sealed class CodeOrbitHubState : ICodeOrbitHubState
             foreach (var pending in questions)
             {
                 if (pending.Completion == completion)
+                {
                     removed = true;
+                    actionId = pending.ActionId;
+                    sessionId = pending.Question.SessionId;
+                    kind = "question";
+                }
                 else
+                {
                     _questionQueue.Enqueue(pending);
+                }
             }
         }
 
@@ -569,9 +687,10 @@ public sealed class CodeOrbitHubState : ICodeOrbitHubState
         string? affectedActionId,
         string? normalizedEventName,
         SideEffect effect,
-        string? realtimeEventType)
+        string? realtimeEventType,
+        PendingResolutionDto? resolution = null)
     {
-        var args = CreateStateChangedArgs(affectedSessionId, affectedActionId, normalizedEventName, effect, realtimeEventType);
+        var args = CreateStateChangedArgs(affectedSessionId, affectedActionId, normalizedEventName, effect, realtimeEventType, resolution);
         StateChanged?.Invoke(this, args);
 
         if (realtimeEventType != null)
@@ -586,7 +705,8 @@ public sealed class CodeOrbitHubState : ICodeOrbitHubState
         string? affectedActionId,
         string? normalizedEventName,
         SideEffect effect,
-        string? realtimeEventType)
+        string? realtimeEventType,
+        PendingResolutionDto? resolution)
     {
         lock (_gate)
         {
@@ -597,7 +717,8 @@ public sealed class CodeOrbitHubState : ICodeOrbitHubState
                 affectedActionId,
                 normalizedEventName,
                 effect,
-                realtimeEventType);
+                realtimeEventType,
+                resolution);
         }
     }
 
@@ -607,7 +728,12 @@ public sealed class CodeOrbitHubState : ICodeOrbitHubState
             "session.updated" => args.Sessions.Select(MapSession).ToList(),
             "session.removed" => new { sessionId = args.AffectedSessionId },
             "pending.updated" => args.PendingActions.Select(MapPendingAction).ToList(),
-            "pending.resolved" => new { actionId = args.AffectedActionId, pending = args.PendingActions.Select(MapPendingAction).ToList() },
+            "pending.resolved" => new
+            {
+                actionId = args.AffectedActionId,
+                resolution = args.Resolution,
+                pending = args.PendingActions.Select(MapPendingAction).ToList()
+            },
             _ => null
         };
 

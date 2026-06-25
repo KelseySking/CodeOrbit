@@ -152,6 +152,70 @@ public class CodeOrbitHubStateTests
         Assert.Empty(state.GetSessions());
     }
 
+    [Fact]
+    public async Task AllowPermission_RecordsHistoryAndBroadcastsResolutionWithDecisionAndActor()
+    {
+        var state = new CodeOrbitHubState();
+        HubStateChangedEventArgs? changeArgs = null;
+        state.StateChanged += (_, args) => Interlocked.Exchange(ref changeArgs, args);
+
+        var evt = MakeEvent(new Dictionary<string, object?>
+        {
+            ["hook_event_name"] = "PreToolUse",
+            ["session_id"] = "session-1",
+            ["tool_name"] = "Bash",
+            ["tool_input"] = new { command = "dotnet test", requires_approval = true }
+        });
+
+        var responseTask = state.HandleBlockingEventAsync(evt, TimeSpan.FromSeconds(5), CancellationToken.None);
+        var pending = Assert.Single(state.GetPendingActions());
+
+        Assert.True(state.AllowPermission(pending.ActionId, always: false, actor: "phone-A"));
+
+        await responseTask.WaitAsync(TimeSpan.FromSeconds(5));
+
+        // History entry carries decision + actor.
+        var history = Assert.Single(state.GetPendingHistory());
+        Assert.Equal(pending.ActionId, history.ActionId);
+        Assert.Equal("allow", history.Decision);
+        Assert.Equal("phone-A", history.Actor);
+        Assert.Empty(state.GetPendingActions());
+
+        // The state-changed broadcast embedded the resolution object.
+        Assert.NotNull(changeArgs);
+        Assert.Equal("pending.resolved", changeArgs!.RealtimeEventType);
+        Assert.NotNull(changeArgs.Resolution);
+        Assert.Equal(pending.ActionId, changeArgs.Resolution!.ActionId);
+        Assert.Equal("allow", changeArgs.Resolution.Decision);
+        Assert.Equal("phone-A", changeArgs.Resolution.Actor);
+    }
+
+    [Fact]
+    public async Task BlockTimeout_RecordsTimeoutResolutionInHistory()
+    {
+        var state = new CodeOrbitHubState();
+
+        var evt = MakeEvent(new Dictionary<string, object?>
+        {
+            ["hook_event_name"] = "PreToolUse",
+            ["session_id"] = "session-1",
+            ["tool_name"] = "Bash",
+            ["tool_input"] = new { command = "dotnet test", requires_approval = true }
+        });
+
+        var responseTask = state.HandleBlockingEventAsync(evt, TimeSpan.FromMilliseconds(50), CancellationToken.None);
+        var response = await responseTask.WaitAsync(TimeSpan.FromSeconds(5));
+        using var doc = JsonDocument.Parse(response);
+        Assert.Equal("deny", doc.RootElement
+            .GetProperty("hookSpecificOutput")
+            .GetProperty("permissionDecision")
+            .GetString());
+
+        var history = Assert.Single(state.GetPendingHistory());
+        Assert.Equal("timeout", history.Decision);
+        Assert.Null(history.Actor);
+    }
+
     private static HookEvent MakeEvent(Dictionary<string, object?> payload, string source = "claude")
     {
         using var doc = JsonDocument.Parse(JsonSerializer.Serialize(payload));

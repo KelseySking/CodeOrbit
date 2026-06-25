@@ -130,14 +130,35 @@ public sealed record PendingActionDto(
     PermissionRequestDto? Permission,
     QuestionDto? Question);
 
-public sealed record PermissionDecisionRequest(bool Always = false, string? Reason = null);
+/// <summary>
+/// Record of a pending action that has been resolved (approved/denied/answered/dismissed/timed-out).
+/// Broadcast on the <c>pending.resolved</c> realtime channel so every connected display
+/// learns not just that the action ended, but what was decided and by whom — enabling
+/// multi-device approval where the device that did not act still sees the outcome.
+/// </summary>
+public sealed record PendingResolutionDto(
+    string ActionId,
+    string Kind,
+    string? SessionId,
+    string? Source,
+    string Decision,
+    string? Actor,
+    string? Reason,
+    DateTimeOffset ResolvedAtUtc);
+
+public sealed record PendingHistoryDto(
+    IReadOnlyList<PendingResolutionDto> Entries);
+
+public sealed record PermissionDecisionRequest(bool Always = false, string? Reason = null, string? Actor = null);
 
 public sealed record QuestionAnswerRequest(
     string? Answer = null,
-    IReadOnlyDictionary<string, IReadOnlyList<string>>? Answers = null);
+    IReadOnlyDictionary<string, IReadOnlyList<string>>? Answers = null,
+    string? Actor = null);
 
 public sealed record QuestionCurrentAnswerRequest(
-    IReadOnlyList<string> Answers);
+    IReadOnlyList<string> Answers,
+    string? Actor = null);
 
 public sealed record QuestionCurrentAnswerResultDto(
     bool Success,

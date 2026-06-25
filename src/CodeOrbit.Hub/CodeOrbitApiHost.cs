@@ -152,15 +152,16 @@ public sealed class CodeOrbitApiHost : IAsyncDisposable, IDisposable
 
         api.MapGet("/pending", _state.GetPendingActions);
         api.MapGet("/pending/{actionId}", (string actionId) => ToResult(_state.GetPendingAction(actionId)));
+        api.MapGet("/pending/history", (int? limit) => Results.Ok(new PendingHistoryDto(_state.GetPendingHistory(limit ?? 100))));
         api.MapPost("/permissions/{actionId}/allow", async (string actionId, HttpContext context) =>
         {
             var request = await ReadBodyAsync<PermissionDecisionRequest>(context) ?? new PermissionDecisionRequest();
-            return await RunPendingOperationAsync(actionId, () => _state.AllowPermission(actionId, request.Always));
+            return await RunPendingOperationAsync(actionId, () => _state.AllowPermission(actionId, request.Always, request.Actor));
         });
         api.MapPost("/permissions/{actionId}/deny", async (string actionId, HttpContext context) =>
         {
             var request = await ReadBodyAsync<PermissionDecisionRequest>(context) ?? new PermissionDecisionRequest();
-            return await RunPendingOperationAsync(actionId, () => _state.DenyPermission(actionId, request.Reason ?? "user denied"));
+            return await RunPendingOperationAsync(actionId, () => _state.DenyPermission(actionId, request.Reason ?? "user denied", request.Actor));
         });
         api.MapPost("/questions/{actionId}/answer", async (string actionId, HttpContext context) =>
         {
@@ -170,7 +171,7 @@ public sealed class CodeOrbitApiHost : IAsyncDisposable, IDisposable
         api.MapPost("/questions/{actionId}/answer-current", async (string actionId, HttpContext context) =>
         {
             var request = await ReadBodyAsync<QuestionCurrentAnswerRequest>(context) ?? new QuestionCurrentAnswerRequest([]);
-            return RunCurrentQuestionOperation(actionId, request.Answers ?? []);
+            return RunCurrentQuestionOperation(actionId, request.Answers ?? [], request.Actor);
         });
         api.MapPost("/questions/{actionId}/dismiss", async (string actionId) =>
             await RunPendingOperationAsync(actionId, () => _state.DismissQuestion(actionId, "dismissed")));
@@ -205,9 +206,9 @@ public sealed class CodeOrbitApiHost : IAsyncDisposable, IDisposable
         return Task.FromResult<IResult>(Results.Ok(new { success }));
     }
 
-    private IResult RunCurrentQuestionOperation(string actionId, IReadOnlyList<string> answers)
+    private IResult RunCurrentQuestionOperation(string actionId, IReadOnlyList<string> answers, string? actor)
     {
-        if (!_state.AnswerCurrentQuestion(actionId, answers, out var resolved))
+        if (!_state.AnswerCurrentQuestion(actionId, answers, out var resolved, actor))
             return Results.NotFound(new ApiErrorDto("not_found", "Pending action not found"));
 
         return Results.Ok(new QuestionCurrentAnswerResultDto(Success: true, Resolved: resolved));

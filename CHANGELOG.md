@@ -5,6 +5,16 @@ All notable changes to CodeOrbit will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- 多设备审批协同：`pending.resolved` 实时事件新增 `resolution`（`PendingResolutionDto`），携带 `decision`、`actor`、`reason`、`resolvedAtUtc`，让未操作的展示端也能知道该审批被谁、以何种方式结束
+- 审批历史接口 `GET /api/pending/history?limit=`，断线重连或后加入的展示端可补看已结束审批的决策记录（进程内环形缓冲，上限 200 条）
+- 决策请求体（`PermissionDecisionRequest` / `QuestionAnswerRequest` / `QuestionCurrentAnswerRequest`）新增可选 `actor` 字段，用于自报发起端标识
+
+### Changed
+- 超时结束的 pending 也会记入历史并广播 `pending.resolved`（`decision="timeout"`），此前超时不广播任何决定信号
+
 ## [1.0.1] - 2026-06-18
 
 ### Added

@@ -9,13 +9,14 @@ public interface ICodeOrbitHubState
     IReadOnlyList<ChatMessageDto> GetSessionMessages(string sessionId);
     IReadOnlyList<PendingActionDto> GetPendingActions();
     PendingActionDto? GetPendingAction(string actionId);
+    IReadOnlyList<PendingResolutionDto> GetPendingHistory(int limit = 100);
     bool DismissSession(string sessionId);
     bool ActivateTerminal(string sessionId);
-    bool AllowPermission(string actionId, bool always);
-    bool DenyPermission(string actionId, string reason);
+    bool AllowPermission(string actionId, bool always, string? actor = null);
+    bool DenyPermission(string actionId, string reason, string? actor = null);
     bool AnswerQuestion(string actionId, QuestionAnswerRequest request);
-    bool AnswerCurrentQuestion(string actionId, IReadOnlyList<string> answers, out bool resolved);
-    bool DismissQuestion(string actionId, string reason);
+    bool AnswerCurrentQuestion(string actionId, IReadOnlyList<string> answers, out bool resolved, string? actor = null);
+    bool DismissQuestion(string actionId, string reason, string? actor = null);
 }
 
 public interface ICodeOrbitSourceService

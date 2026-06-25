@@ -384,17 +384,60 @@ Runtime 会触发终端激活请求。具体是否能激活取决于当前宿主
 
 成功返回 `PendingActionDto`。未知 action 返回 `404 ApiErrorDto`。
 
+### `GET /api/pending/history`
+
+返回最近 N 条已处理 pending action 的决定记录，供断线重连或后加入的展示端补看"已结束的审批到底是被谁、如何决定的"。
+
+请求 query：
+
+| 参数 | 类型 | 默认 | 说明 |
+|------|------|------|------|
+| `limit` | int | 100 | 返回最近多少条，最大 200（内部环形缓冲区上限）。 |
+
+响应 `PendingHistoryDto`：
+
+```json
+{
+  "entries": [
+    {
+      "actionId": "permission-....",
+      "kind": "permission",
+      "sessionId": "session-1",
+      "source": "claude",
+      "decision": "allow",
+      "actor": "phone-A",
+      "reason": null,
+      "resolvedAtUtc": "2026-06-25T12:34:56Z"
+    }
+  ]
+}
+```
+
+`decision` 取值：
+
+| decision | 含义 |
+|----------|------|
+| `allow` | permission 被批准（本次） |
+| `allow-always` | permission 被批准并要求 always allow |
+| `deny` | permission 被拒绝，`reason` 附带原因 |
+| `answered` | question 已作答 |
+| `dismissed` | question 被取消 |
+| `timeout` | 阻塞等待超时，CLI 侧会收到拒绝/取消响应 |
+
+`actor` 是发起决策的展示端在 `POST` 时自报的标识，可为 `null`（兼容旧客户端；超时条目也记 `null`）。Runtime 不校验其唯一性，由展示端约定（如设备名 + 会话 ID）。多个展示端并发操作同一 action 时只有第一个成功；落后端会被 `404` 或 WS 的 `pending.resolved` 通知该 action 已被其他 actor 处理。
+
 ### `POST /api/permissions/{actionId}/allow`
 
 请求 `PermissionDecisionRequest`：
 
 ```json
 {
-  "always": false
+  "always": false,
+  "actor": "phone-A"
 }
 ```
 
-`always=true` 表示用户希望将相同安全规则持久化为 always allow。是否支持取决于 source 能力。
+`always=true` 表示用户希望将相同安全规则持久化为 always allow。是否支持取决于 source 能力。`actor` 可选，自报标识，会随 `pending.resolved` 广播给其他展示端。
 
 成功响应：
 
@@ -412,7 +455,8 @@ Runtime 会触发终端激活请求。具体是否能激活取决于当前宿主
 
 ```json
 {
-  "reason": "denied from mobile"
+  "reason": "denied from mobile",
+  "actor": "phone-A"
 }
 ```
 
@@ -435,7 +479,8 @@ Runtime 会触发终端激活请求。具体是否能激活取决于当前宿主
   "answers": {
     "language": ["zh-CN"],
     "style": ["compact"]
-  }
+  },
+  "actor": "phone-A"
 }
 ```
 
@@ -443,9 +488,12 @@ Runtime 会触发终端激活请求。具体是否能激活取决于当前宿主
 
 ```json
 {
-  "answer": "yes"
+  "answer": "yes",
+  "actor": "phone-A"
 }
 ```
+
+`actor` 可选，自报标识，会随 `pending.resolved` 广播。
 
 成功响应：
 
@@ -463,7 +511,8 @@ Runtime 会触发终端激活请求。具体是否能激活取决于当前宿主
 
 ```json
 {
-  "answers": ["选项 A"]
+  "answers": ["选项 A"],
+  "actor": "phone-A"
 }
 ```
 
@@ -647,7 +696,7 @@ ws://127.0.0.1:32145/api/events?token=<api_token>
 | `session.updated` | `SessionDto[]` | 替换或 reconcile session 列表。 |
 | `session.removed` | `{ "sessionId": string }` | 移除本地 session，或重新拉取 `/api/sessions`。 |
 | `pending.updated` | `PendingActionDto[]` | 替换或 reconcile pending 列表。 |
-| `pending.resolved` | `{ "actionId": string, "pending": PendingActionDto[] }` | 移除已处理 action，并 reconcile pending 列表。 |
+| `pending.resolved` | `{ "actionId": string, "resolution": PendingResolutionDto, "pending": PendingActionDto[] }` | 移除已处理 action，reconcile pending 列表，并通过 `resolution` 得知它被谁（`actor`）、以何种方式（`decision`/`reason`）结束。 |
 | `source.statusChanged` | `SourceOperationResultDto` 或 `SourceDto[]` | 重新拉取 `/api/sources`。 |
 
 Runtime 支持多个 WebSocket client 同时连接。所有 client 会收到同一批事件。因为多个展示端可能同时操作同一个 pending action，展示端收到 `404` 或 `pending.resolved` 后应刷新 `/api/pending`，不要继续假设本地按钮仍有效。

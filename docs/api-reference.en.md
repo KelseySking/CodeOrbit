@@ -294,13 +294,46 @@ Returns `PendingActionDto[]`:
 
 `kind` is currently `permission` or `question`; clients must tolerate new values.
 
+### Resolution history
+
+`GET /api/pending/history?limit=100` returns the most recent resolved pending actions as `PendingHistoryDto`, so late-joining or reconnecting displays can see not just that an action ended, but *how* and *by whom* it was decided:
+
+```json
+{
+  "entries": [
+    {
+      "actionId": "permission-....",
+      "kind": "permission",
+      "sessionId": "session-1",
+      "source": "claude",
+      "decision": "allow",
+      "actor": "phone-A",
+      "reason": null,
+      "resolvedAtUtc": "2026-06-25T12:34:56Z"
+    }
+  ]
+}
+```
+
+| decision | meaning |
+| --- | --- |
+| `allow` | permission approved (this time) |
+| `allow-always` | permission approved with "always allow" requested |
+| `deny` | permission denied (`reason` carries the cause) |
+| `answered` | question answered |
+| `dismissed` | question dismissed |
+| `timeout` | blocking hook wait timed out; CLI receives a deny/dismiss response |
+
+`actor` is the self-reported identifier the display passed in the resolving `POST`. It may be `null` for older clients and for timeout entries (which have no actor). Runtime does not enforce uniqueness; displays agree on a convention (e.g. device name + session id).
+
 ### Permission actions
 
 Allow request body:
 
 ```json
 {
-  "always": false
+  "always": false,
+  "actor": "phone-A"
 }
 ```
 
@@ -308,11 +341,12 @@ Deny request body:
 
 ```json
 {
-  "reason": "denied from mobile"
+  "reason": "denied from mobile",
+  "actor": "phone-A"
 }
 ```
 
-Both return `{ "success": true }` or `404`. If multiple displays act on the same `actionId`, only the first succeeds; others should refetch `/api/pending`.
+`actor` is optional and self-reported; it is broadcast to other displays via `pending.resolved`. Both return `{ "success": true }` or `404`. If multiple displays act on the same `actionId`, only the first succeeds; others should refetch `/api/pending`.
 
 ### Question actions
 
@@ -323,7 +357,8 @@ Full answer map:
   "answers": {
     "language": ["en-US"],
     "style": ["compact"]
-  }
+  },
+  "actor": "phone-A"
 }
 ```
 
@@ -331,7 +366,8 @@ Single-answer fallback:
 
 ```json
 {
-  "answer": "yes"
+  "answer": "yes",
+  "actor": "phone-A"
 }
 ```
 
@@ -339,7 +375,8 @@ Step-by-step current question answer:
 
 ```json
 {
-  "answers": ["Option A"]
+  "answers": ["Option A"],
+  "actor": "phone-A"
 }
 ```
 
@@ -390,13 +427,15 @@ Step-by-step current question answer:
 | DTO | Fields |
 | --- | --- |
 | `PendingActionDto` | `actionId`, `kind`, `sessionId`, `source`, `sourceDisplayName`, `projectName`, `workingDirectory`, `createdAtUtc`, `permission`, `question` |
+| `PendingResolutionDto` | `actionId`, `kind`, `sessionId`, `source`, `decision`, `actor`, `reason`, `resolvedAtUtc` |
+| `PendingHistoryDto` | `entries` (list of `PendingResolutionDto`) |
 | `PermissionRequestDto` | `sessionId`, `toolName`, `toolUseId`, `toolInput`, `description`, `hookEventName` |
-| `PermissionDecisionRequest` | `always`, `reason` |
+| `PermissionDecisionRequest` | `always`, `reason`, `actor` |
 | `QuestionDto` | `sessionId`, `id`, `question`, `header`, `options`, `multiSelect`, `isMultiQuestion`, `questions`, `hookEventName`, `isAskUserQuestion`, `isCodexRequestUserInput`, `currentQuestionIndex`, `currentAnswerKey` |
 | `QuestionItemDto` | `id`, `question`, `header`, `options`, `multiSelect`, `allowFreeText` |
 | `QuestionOptionDto` | `label`, `description`, `value` |
-| `QuestionAnswerRequest` | `answer`, `answers` |
-| `QuestionCurrentAnswerRequest` | `answers` |
+| `QuestionAnswerRequest` | `answer`, `answers`, `actor` |
+| `QuestionCurrentAnswerRequest` | `answers`, `actor` |
 | `QuestionCurrentAnswerResultDto` | `success`, `resolved` |
 
 ## WebSocket Events
@@ -424,7 +463,7 @@ Known events:
 | `session.updated` | `SessionDto[]` | Replace or reconcile session list. |
 | `session.removed` | `{ "sessionId": string }` | Remove the session locally or refetch `/api/sessions`. |
 | `pending.updated` | `PendingActionDto[]` | Replace or reconcile pending list. |
-| `pending.resolved` | `{ "actionId": string, "pending": PendingActionDto[] }` | Remove resolved action and reconcile pending list. |
+| `pending.resolved` | `{ "actionId": string, "resolution": PendingResolutionDto, "pending": PendingActionDto[] }` | Remove resolved action, reconcile pending list, and learn via `resolution` who (`actor`) ended it and how (`decision`/`reason`). |
 | `source.statusChanged` | `SourceOperationResultDto` or `SourceDto[]` | Refetch `/api/sources`. |
 
 Runtime broadcasts events to every connected display client. Use REST snapshots as recovery state after reconnect.
